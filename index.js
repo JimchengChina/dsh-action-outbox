@@ -68,7 +68,7 @@ export function apply(ctx, inputConfig = {}) {
     }
     if (exec.name !== 'action_outbox_commit' || !config.requireApproval) return next()
     const digest = expectedDigest(exec.arguments)
-    const review = ledger.review(ownerOf(exec))
+    const review = ledger.inspect(ownerOf(exec))
     if (!review.ok || digest === undefined || review.digest !== digest) return next()
     return { kind: 'ask', reason: approvalReason(review, config.approvalPreviewChars) }
   })

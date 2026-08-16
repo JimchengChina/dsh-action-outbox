@@ -40,7 +40,8 @@ test('ledger requires an exact reviewed digest and never repeats a completed bat
   const mismatch = ledger.beginCommit(owner, 'sha256:not-the-review')
   assert.equal(mismatch.code, 'digest_mismatch')
 
-  const started = ledger.beginCommit(owner, staged.digest)
+  const review = ledger.review(owner)
+  const started = ledger.beginCommit(owner, review.digest)
   assert.equal(started.ok, true)
   ledger.markSucceeded(owner, 'action-1', { ok: true, output_preview: 'done' })
   const finished = ledger.finish(owner)
@@ -53,6 +54,7 @@ test('a failed commit is blocked and cannot be retried accidentally', () => {
   const ledger = new OutboxLedger({ maxActions: 3 })
   ledger.begin(owner, 'publish')
   const review = ledger.stage(owner, { tool: 'publish', arguments: { id: 1 } })
+  ledger.review(owner)
   ledger.beginCommit(owner, review.digest)
   ledger.block(owner, 'action-1', { ok: false, error: 'timeout' })
   const blocked = ledger.review(owner)
@@ -60,6 +62,18 @@ test('a failed commit is blocked and cannot be retried accidentally', () => {
   assert.equal(blocked.actions[0].status, 'failed')
   assert.equal(ledger.beginCommit(owner, blocked.digest).code, 'outbox_not_open')
   assert.equal(ledger.discard(owner).external_actions_executed, 0)
+})
+
+test('ledger will not treat a staged digest as evidence of review', () => {
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3 })
+  ledger.begin(owner, 'explicit review')
+  const staged = ledger.stage(owner, { tool: 'publish', arguments: { id: 1 } })
+  assert.equal(staged.reviewed, false)
+  assert.equal(ledger.beginCommit(owner, staged.digest).code, 'review_required')
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+  assert.equal(ledger.beginCommit(owner, reviewed.digest).ok, true)
 })
 
 test('limits use UTF-8 bytes and approval previews remain bounded', () => {

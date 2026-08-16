@@ -81,8 +81,9 @@ test('enforced tools reject direct calls but allow reviewed commit lineage', asy
   const staged = valueOf(await call(ctx, 's1', 'action_outbox_stage', {
     tool: 'danger_write', arguments: { value: 'staged' },
   }))
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
   const committed = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
-    expected_digest: staged.digest,
+    expected_digest: review.digest,
   }))
   assert.equal(committed.phase, 'committed')
   assert.equal(effects, 1)
@@ -100,7 +101,8 @@ test('approval is fail-closed when no approval service is mounted', async () => 
   const staged = valueOf(await call(ctx, 's1', 'action_outbox_stage', {
     tool: 'external_write', arguments: { value: 'x' },
   }))
-  const result = await call(ctx, 'c1', 'action_outbox_commit', { expected_digest: staged.digest })
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
+  const result = await call(ctx, 'c1', 'action_outbox_commit', { expected_digest: review.digest })
   assert.equal(result.isError, true)
   assert.equal(effects, 0)
   await ctx.root.fiber.dispose()
@@ -124,8 +126,9 @@ test('commit stops on first failure and keeps a non-retryable partial receipt', 
   const staged = valueOf(await call(ctx, 's2', 'action_outbox_stage', {
     tool: 'write_fail', arguments: { value: 'unknown' },
   }))
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
   const commit = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
-    expected_digest: staged.digest,
+    expected_digest: review.digest,
   }))
   assert.equal(commit.code, 'action_failed')
   assert.equal(commit.outbox.phase, 'blocked')
@@ -164,6 +167,7 @@ test('tool identity drift blocks the whole commit before its first side effect',
   const staged = valueOf(await call(ctx, 's1', 'action_outbox_stage', {
     tool: 'hot_write', arguments: { value: 'x' },
   }))
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
 
   dispose()
   ctx.tools.register(stringTool('hot_write', () => {
@@ -171,9 +175,39 @@ test('tool identity drift blocks the whole commit before its first side effect',
     return 'new'
   }))
   const commit = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
-    expected_digest: staged.digest,
+    expected_digest: review.digest,
   }))
   assert.equal(commit.code, 'commit_preflight_failed')
   assert.equal(effects, 0)
+  await ctx.root.fiber.dispose()
+})
+
+test('commit requires an explicit review after the final staged change', async () => {
+  const ctx = await setup({ requireApproval: false })
+  let effects = 0
+  ctx.tools.register(stringTool('external_write', () => {
+    effects += 1
+    return 'ok'
+  }))
+
+  valueOf(await call(ctx, 'b1', 'action_outbox_begin', { label: 'review gate' }))
+  const staged = valueOf(await call(ctx, 's1', 'action_outbox_stage', {
+    tool: 'external_write', arguments: { value: 'x' },
+  }))
+  assert.equal(staged.reviewed, false)
+
+  const skipped = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
+    expected_digest: staged.digest,
+  }))
+  assert.equal(skipped.code, 'review_required')
+  assert.equal(effects, 0)
+
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
+  assert.equal(review.reviewed, true)
+  const committed = valueOf(await call(ctx, 'c2', 'action_outbox_commit', {
+    expected_digest: review.digest,
+  }))
+  assert.equal(committed.phase, 'committed')
+  assert.equal(effects, 1)
   await ctx.root.fiber.dispose()
 })
