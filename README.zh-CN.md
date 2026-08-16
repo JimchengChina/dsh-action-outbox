@@ -13,7 +13,7 @@ Worktree 和文件 checkpoint 能恢复本地代码，却无法撤回已经发�
 安装 GitHub 上带版本标签的发布：
 
 ```sh
-dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.1.0
+dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.2.0
 ```
 
 或者从本地 checkout 安装：
@@ -91,6 +91,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 - 后续规划依赖返回值的读取类工具，应正常调用，不应暂存。
 
 功能对比、重复项目扫描和论文依据见[研究说明](docs/research.md)。
+部署假设和滥用场景见[安全策略与威胁模型](SECURITY.md)，更严格的起步配置见 [`examples/enforced-external-actions.yml`](examples/enforced-external-actions.yml)。
 
 ## 开发
 

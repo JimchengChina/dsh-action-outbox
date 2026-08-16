@@ -1,0 +1,26 @@
+- id: action-outbox
+  name: dsh-action-outbox
+  config:
+    include:
+      - github_create_*
+      - github_update_*
+      - github_add_*
+      - slack_send
+      - deploy_*
+    exclude:
+      - github_get_*
+      - github_list_*
+      - github_search_*
+    enforce:
+      - github_create_*
+      - github_update_*
+      - github_add_*
+      - slack_send
+      - deploy_*
+    requireApproval: true
+    rejectDuplicateActions: true
+    maxPendingMs: 1800000
+    maxActions: 20
+    maxArgumentBytes: 65536
+    resultPreviewChars: 2000
+    approvalPreviewChars: 4000

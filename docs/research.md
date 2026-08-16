@@ -2,6 +2,21 @@
 
 Research date: 2026-08-16. Product capabilities and repository inventories are time-sensitive; links below are the primary sources checked on that date.
 
+## Follow-up implementation review
+
+The first public implementation was re-audited against the current DSH `ToolDefinition` and execution pipeline, the MCP maintainers' [tool-annotation risk vocabulary](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/), and the OpenAI Agents SDK guidance on [call-scoped approvals](https://github.com/openai/openai-agents-python/blob/main/docs/human_in_the_loop.md) and [tool call ids for side effects](https://github.com/openai/openai-agents-python/blob/main/docs/models/index.md). That review produced eight behavior changes before the v0.2 release:
+
+1. A digest returned by staging is no longer enough; commit requires a later explicit review of the final batch.
+2. Review performs the same live tool-identity and schema preflight as commit.
+3. Commit authority is shallow and cannot authorize unlisted descendant tool calls.
+4. Exact duplicate target-name/argument pairs are rejected by default.
+5. Individual staged actions can be removed without reusing their ids.
+6. Open batches expire after 30 minutes by default, invalidating stale review state without dispatch.
+7. Receipts retain deterministic nested call ids, timing, and structured DSH error identity.
+8. DSH-native call/result presentation metadata gives clients a concise card while preserving authoritative review content.
+
+MCP annotations remain hints rather than enforcement, and DSH does not currently expose that vocabulary on `ToolDefinition`. The plugin therefore uses pessimistic explicit policy patterns and deterministic guards instead of inferring safety from tool names or untrusted metadata.
+
 ## The category mistake to avoid
 
 DeepSeek Harness, Claude Code, Codex, CCCC, NeMo Agent Toolkit, Gemini Enterprise Agent Platform, and Amazon Bedrock AgentCore overlap, but they do not occupy one layer.

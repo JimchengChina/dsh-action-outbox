@@ -13,7 +13,7 @@ Worktrees and file checkpoints help coding agents recover local code. They do no
 Install the tagged release from GitHub:
 
 ```sh
-dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.1.0
+dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.2.0
 ```
 
 Or install from a checkout:
@@ -91,6 +91,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - Read tools whose outputs are needed for later planning should be called normally, not staged.
 
 See [the research note](docs/research.md) for the feature comparison, duplicate scan, and paper-derived design rationale.
+For deployment assumptions and abuse cases, read [the security policy and threat model](SECURITY.md). A stricter starter configuration is available at [`examples/enforced-external-actions.yml`](examples/enforced-external-actions.yml).
 
 ## Development
 
