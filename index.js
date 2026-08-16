@@ -44,6 +44,25 @@ function expectedDigest(value) {
   return typeof value.expected_digest === 'string' ? value.expected_digest : undefined
 }
 
+function preflightActions(ctx, actions, agent) {
+  for (const action of actions) {
+    const target = ctx.tools.get(action.tool, agent)
+    const changed = target === undefined || target !== action.definition
+    const violations = target === undefined
+      ? []
+      : validateJsonSchemaValue(target.parameters, action.arguments, 'arguments')
+    if (changed || violations.length > 0) {
+      return {
+        action,
+        detail: changed
+          ? `Tool "${action.tool}" was removed or replaced after staging.`
+          : `Arguments no longer satisfy "${action.tool}": ${violations.join('; ')}`,
+      }
+    }
+  }
+  return undefined
+}
+
 export function apply(ctx, inputConfig = {}) {
   const config = resolveConfig(inputConfig)
   const policy = compilePolicy(config)
@@ -157,10 +176,23 @@ export function apply(ctx, inputConfig = {}) {
 
   ctx.tools.register(defineTool({
     name: 'action_outbox_review',
-    description: 'Return the exact staged batch, statuses, and digest required by action_outbox_commit.',
+    description:
+      'Preflight every target against the live DSH registry, then mark and return the exact staged batch and digest required by action_outbox_commit.',
     parameters: {},
     output: jsonOutput(),
     async execute(_args, exec) {
+      const owner = ownerOf(exec)
+      const candidate = ledger.reviewCandidate(owner)
+      if (!candidate.ok) return candidate.outbox ?? candidate
+      const issue = preflightActions(ctx, candidate.actions, exec.agent)
+      if (issue !== undefined) {
+        return {
+          ok: false,
+          code: 'review_preflight_failed',
+          message: `${issue.detail} Restage the action before requesting approval.`,
+          outbox: ledger.inspect(owner),
+        }
+      }
       return ledger.review(ownerOf(exec))
     },
   }))
@@ -185,23 +217,14 @@ export function apply(ctx, inputConfig = {}) {
       // Validate the whole batch against the exact definitions captured while
       // staging before the first side effect. HMR or schema drift cannot turn a
       // previously reviewed name/argument pair into a different capability.
-      for (const action of started.actions) {
-        const target = ctx.tools.get(action.tool, exec.agent)
-        const changed = target === undefined || target !== action.definition
-        const violations = target === undefined
-          ? []
-          : validateJsonSchemaValue(target.parameters, action.arguments, 'arguments')
-        if (changed || violations.length > 0) {
-          const detail = changed
-            ? `Tool "${action.tool}" was removed or replaced after staging.`
-            : `Arguments no longer satisfy "${action.tool}": ${violations.join('; ')}`
-          ledger.block(owner, action.id, { ok: false, error: detail })
-          return {
-            ok: false,
-            code: 'commit_preflight_failed',
-            message: `${detail} No target action was dispatched.`,
-            outbox: ledger.review(owner),
-          }
+      const issue = preflightActions(ctx, started.actions, exec.agent)
+      if (issue !== undefined) {
+        ledger.block(owner, issue.action.id, { ok: false, error: issue.detail })
+        return {
+          ok: false,
+          code: 'commit_preflight_failed',
+          message: `${issue.detail} No target action was dispatched.`,
+          outbox: ledger.review(owner),
         }
       }
 

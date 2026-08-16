@@ -182,6 +182,27 @@ test('tool identity drift blocks the whole commit before its first side effect',
   await ctx.root.fiber.dispose()
 })
 
+test('review detects target identity drift before approval or commit', async () => {
+  const ctx = await setup({ requireApproval: false })
+  const dispose = ctx.tools.register(stringTool('hot_write', () => 'old'))
+  valueOf(await call(ctx, 'b1', 'action_outbox_begin', { label: 'review preflight' }))
+  const staged = valueOf(await call(ctx, 's1', 'action_outbox_stage', {
+    tool: 'hot_write', arguments: { value: 'x' },
+  }))
+
+  dispose()
+  ctx.tools.register(stringTool('hot_write', () => 'new'))
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
+  assert.equal(review.code, 'review_preflight_failed')
+  assert.equal(review.outbox.reviewed, false)
+
+  const commit = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
+    expected_digest: staged.digest,
+  }))
+  assert.equal(commit.code, 'review_required')
+  await ctx.root.fiber.dispose()
+})
+
 test('commit requires an explicit review after the final staged change', async () => {
   const ctx = await setup({ requireApproval: false })
   let effects = 0
