@@ -28,9 +28,10 @@ The package is a DSH bundle and activates itself through `cordis.patch.yml`.
 
 1. `action_outbox_begin({ label })`
 2. One or more `action_outbox_stage({ tool, arguments, summary? })`
-3. `action_outbox_review()`
-4. Inspect the exact actions and copy the full `digest`
-5. `action_outbox_commit({ expected_digest: digest })` or `action_outbox_discard()`
+3. Optionally remove a mistake with `action_outbox_unstage({ action_id })`
+4. `action_outbox_review()`
+5. Inspect the exact actions and copy the full `digest`
+6. `action_outbox_commit({ expected_digest: digest })` or `action_outbox_discard()`
 
 Before commit, discarding guarantees that no staged target action ran. A changed batch gets a changed digest, so a stale approval cannot commit it.
 

@@ -75,7 +75,8 @@ export function apply(ctx, inputConfig = {}) {
     order: 119,
     text:
       'Use the action outbox when several side-effecting tool calls should be reviewed as one batch. '
-      + 'Call action_outbox_begin, stage every action without executing it, call action_outbox_review, '
+      + 'Call action_outbox_begin, stage every action without executing it, optionally unstage mistakes, '
+      + 'then call action_outbox_review, '
       + 'then pass the exact returned digest to action_outbox_commit. Do not claim that a staged action '
       + 'has happened. Before commit, action_outbox_discard guarantees that none of the staged actions ran. '
       + 'After commit starts, external systems are not atomic: if one action fails, stop and report the '
@@ -167,6 +168,19 @@ export function apply(ctx, inputConfig = {}) {
         }
       }
       return ledger.stage(ownerOf(exec), { ...args, definition: target })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'action_outbox_unstage',
+    description:
+      'Remove one pending action from the open outbox without executing it. Action ids remain stable and the changed batch must be reviewed again.',
+    parameters: {
+      action_id: { type: 'string', required: true, description: 'Exact action id returned while staging.' },
+    },
+    output: jsonOutput(),
+    async execute(args, exec) {
+      return ledger.unstage(ownerOf(exec), args.action_id)
     },
   }))
 

@@ -28,9 +28,10 @@ dsh plugin --profile web add ./dsh-action-outbox
 
 1. `action_outbox_begin({ label })`
 2. 一次或多次 `action_outbox_stage({ tool, arguments, summary? })`
-3. `action_outbox_review()`
-4. 核对动作，并复制完整 `digest`
-5. `action_outbox_commit({ expected_digest: digest })`，或调用 `action_outbox_discard()`
+3. 如有错误，可调用 `action_outbox_unstage({ action_id })` 删除单个动作
+4. `action_outbox_review()`
+5. 核对动作，并复制完整 `digest`
+6. `action_outbox_commit({ expected_digest: digest })`，或调用 `action_outbox_discard()`
 
 提交前丢弃可以保证目标动作一个都没执行。暂存内容有任何变化，摘要都会变化，旧审阅结果不能被提交。
 

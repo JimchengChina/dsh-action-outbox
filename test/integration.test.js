@@ -65,6 +65,41 @@ test('staging has zero target side effects and commit executes in order', async 
   await ctx.root.fiber.dispose()
 })
 
+test('one staged action can be removed without rebuilding the batch', async () => {
+  const ctx = await setup({ requireApproval: false })
+  const effects = []
+  ctx.tools.register(stringTool('external_write', args => {
+    effects.push(args.value)
+    return `wrote:${args.value}`
+  }))
+
+  valueOf(await call(ctx, 'b1', 'action_outbox_begin', { label: 'edit batch' }))
+  valueOf(await call(ctx, 's1', 'action_outbox_stage', {
+    tool: 'external_write', arguments: { value: 'keep' },
+  }))
+  valueOf(await call(ctx, 's2', 'action_outbox_stage', {
+    tool: 'external_write', arguments: { value: 'remove' },
+  }))
+  const firstReview = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
+  const changed = valueOf(await call(ctx, 'u1', 'action_outbox_unstage', {
+    action_id: 'action-2',
+  }))
+  assert.equal(changed.reviewed, false)
+  assert.equal(changed.action_count, 1)
+
+  const stale = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
+    expected_digest: firstReview.digest,
+  }))
+  assert.equal(stale.code, 'digest_mismatch')
+  const finalReview = valueOf(await call(ctx, 'r2', 'action_outbox_review'))
+  const committed = valueOf(await call(ctx, 'c2', 'action_outbox_commit', {
+    expected_digest: finalReview.digest,
+  }))
+  assert.equal(committed.phase, 'committed')
+  assert.deepEqual(effects, ['keep'])
+  await ctx.root.fiber.dispose()
+})
+
 test('enforced tools reject direct calls but allow reviewed commit lineage', async () => {
   const ctx = await setup({ requireApproval: false, enforce: ['danger_*'] })
   let effects = 0

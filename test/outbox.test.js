@@ -107,3 +107,23 @@ test('duplicate target calls are rejected by default and can be allowed explicit
     tool: 'send', arguments: { value: 'x' },
   }).action_count, 2)
 })
+
+test('unstaging preserves action identity and invalidates the prior review', () => {
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3 })
+  ledger.begin(owner, 'editable batch')
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'keep' } })
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'remove' } })
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+
+  const changed = ledger.unstage(owner, 'action-2')
+  assert.equal(changed.removed_action.id, 'action-2')
+  assert.equal(changed.reviewed, false)
+  assert.deepEqual(changed.actions.map(action => action.id), ['action-1'])
+  assert.equal(ledger.beginCommit(owner, changed.digest).code, 'review_required')
+
+  const restaged = ledger.stage(owner, { tool: 'send', arguments: { value: 'replacement' } })
+  assert.deepEqual(restaged.actions.map(action => action.id), ['action-1', 'action-3'])
+  assert.equal(ledger.unstage(owner, 'action-2').code, 'unknown_action')
+})
