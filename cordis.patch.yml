@@ -1,0 +1,3 @@
+- insert:
+    - id: action-outbox
+      name: dsh-action-outbox

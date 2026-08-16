@@ -1,0 +1,63 @@
+{
+  "name": "dsh-action-outbox",
+  "version": "0.1.0",
+  "description": "Review-before-commit transactions for DeepSeek Harness tool side effects",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "agent-safety",
+    "human-in-the-loop",
+    "transactional-outbox"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./core": "./lib/outbox.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "docs",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check lib/outbox.js",
+    "test": "node --test",
+    "verify": "pnpm run check && pnpm test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimchengChina/dsh-action-outbox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JimchengChina/dsh-action-outbox/issues"
+  },
+  "homepage": "https://github.com/JimchengChina/dsh-action-outbox#readme",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
