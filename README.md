@@ -46,6 +46,7 @@ The default permits any visible non-internal tool to be staged, requires approva
     exclude: ['github_get_*', 'github_list_*']
     enforce: ['github_create_*', 'github_update_*', 'slack_send', 'deploy_*']
     requireApproval: true
+    rejectDuplicateActions: true
     maxActions: 20
     maxArgumentBytes: 65536
     resultPreviewChars: 2000
@@ -56,6 +57,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - `exclude`: wildcard exceptions to both staging and enforcement.
 - `enforce`: wildcard patterns that reject direct calls and require the transactional route. Empty by default for compatibility.
 - `requireApproval`: ask once for the exact reviewed batch. Without an approval service, commit fails closed.
+- `rejectDuplicateActions`: reject repeated target-name/argument pairs that could otherwise duplicate a write. Disable only when repetition is intentional.
 - `maxActions` / `maxArgumentBytes`: bound retained in-memory state.
 - `resultPreviewChars` / `approvalPreviewChars`: bound model- and user-facing receipts.
 

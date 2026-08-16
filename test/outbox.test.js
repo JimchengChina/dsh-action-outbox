@@ -86,3 +86,24 @@ test('limits use UTF-8 bytes and approval previews remain bounded', () => {
   assert.ok(reason.length < 120)
   assert.equal(review.action_count, 0)
 })
+
+test('duplicate target calls are rejected by default and can be allowed explicitly', () => {
+  const owner = {}
+  const guarded = new OutboxLedger({ maxActions: 3 })
+  guarded.begin(owner, 'deduplicate')
+  guarded.stage(owner, { tool: 'send', arguments: { b: 2, a: 1 }, summary: 'first' })
+  const duplicate = guarded.stage(owner, {
+    tool: 'send', arguments: { a: 1, b: 2 }, summary: 'same effect',
+  })
+  assert.equal(duplicate.code, 'duplicate_action')
+  assert.equal(duplicate.duplicate_of, 'action-1')
+  assert.equal(guarded.inspect(owner).action_count, 1)
+
+  const allowedOwner = {}
+  const allowed = new OutboxLedger({ maxActions: 3, rejectDuplicateActions: false })
+  allowed.begin(allowedOwner, 'repeat intentionally')
+  allowed.stage(allowedOwner, { tool: 'send', arguments: { value: 'x' } })
+  assert.equal(allowed.stage(allowedOwner, {
+    tool: 'send', arguments: { value: 'x' },
+  }).action_count, 2)
+})

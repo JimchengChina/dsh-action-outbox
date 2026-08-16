@@ -17,6 +17,7 @@ export const Config = z.object({
   exclude: z.array(z.string()).default([]),
   enforce: z.array(z.string()).default([]),
   requireApproval: z.boolean().default(true),
+  rejectDuplicateActions: z.boolean().default(true),
   maxActions: z.natural().min(1).default(20),
   maxArgumentBytes: z.natural().min(1).default(64 * 1024),
   resultPreviewChars: z.natural().min(1).default(2_000),

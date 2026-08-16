@@ -46,6 +46,7 @@ dsh plugin --profile web add ./dsh-action-outbox
     exclude: ['github_get_*', 'github_list_*']
     enforce: ['github_create_*', 'github_update_*', 'slack_send', 'deploy_*']
     requireApproval: true
+    rejectDuplicateActions: true
     maxActions: 20
     maxArgumentBytes: 65536
     resultPreviewChars: 2000
@@ -56,6 +57,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 - `exclude`：暂存与强制策略共同使用的例外。
 - `enforce`：匹配的工具禁止直接调用，必须走暂存与提交；为兼容现有部署，默认空数组。
 - `requireApproval`：对准确审阅过的批次只审批一次；没有审批服务时会安全拒绝。
+- `rejectDuplicateActions`：拒绝工具名和参数完全相同的重复动作，避免意外重复写入；确实需要重复时才关闭。
 - `maxActions` / `maxArgumentBytes`：限制内存中的待提交状态。
 - `resultPreviewChars` / `approvalPreviewChars`：限制回执和审批说明长度。
 
