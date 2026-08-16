@@ -48,6 +48,7 @@ dsh plugin --profile web add ./dsh-action-outbox
     enforce: ['github_create_*', 'github_update_*', 'slack_send', 'deploy_*']
     requireApproval: true
     rejectDuplicateActions: true
+    maxPendingMs: 1800000
     maxActions: 20
     maxArgumentBytes: 65536
     resultPreviewChars: 2000
@@ -59,6 +60,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 - `enforce`：匹配的工具禁止直接调用，必须走暂存与提交；为兼容现有部署，默认空数组。
 - `requireApproval`：对准确审阅过的批次只审批一次；没有审批服务时会安全拒绝。
 - `rejectDuplicateActions`：拒绝工具名和参数完全相同的重复动作，避免意外重复写入；确实需要重复时才关闭。
+- `maxPendingMs`：超过指定毫秒数后使未提交批次过期，避免旧意图获得新审批；默认 30 分钟，设为 `0` 可关闭。
 - `maxActions` / `maxArgumentBytes`：限制内存中的待提交状态。
 - `resultPreviewChars` / `approvalPreviewChars`：限制回执和审批说明长度。
 
@@ -75,6 +77,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 - 不自动重试。外部超时可能是“执行成功但回执丢失”，自动重试会造成重复写入。
 - 不承诺虚假的跨系统回滚。前面已经成功的动作不会因为后续失败而消失。
 - 待提交队列只在内存中；插件卸载、重启或崩溃会丢弃意图，但不会意外发出动作。
+- 打开的批次默认 30 分钟后过期；过期会清除审阅状态，但绝不会执行目标动作。
 
 ## 局限
 

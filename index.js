@@ -18,6 +18,7 @@ export const Config = z.object({
   enforce: z.array(z.string()).default([]),
   requireApproval: z.boolean().default(true),
   rejectDuplicateActions: z.boolean().default(true),
+  maxPendingMs: z.natural().default(30 * 60 * 1000),
   maxActions: z.natural().min(1).default(20),
   maxArgumentBytes: z.natural().min(1).default(64 * 1024),
   resultPreviewChars: z.natural().min(1).default(2_000),
@@ -88,7 +89,8 @@ export function apply(ctx, inputConfig = {}) {
     if (exec.name !== 'action_outbox_commit' || !config.requireApproval) return next()
     const digest = expectedDigest(exec.arguments)
     const review = ledger.inspect(ownerOf(exec))
-    if (!review.ok || digest === undefined || review.digest !== digest) return next()
+    if (!review.ok || review.phase !== 'open' || !review.reviewed
+      || digest === undefined || review.digest !== digest) return next()
     return { kind: 'ask', reason: approvalReason(review, config.approvalPreviewChars) }
   })
 
@@ -193,7 +195,7 @@ export function apply(ctx, inputConfig = {}) {
     async execute(_args, exec) {
       const owner = ownerOf(exec)
       const candidate = ledger.reviewCandidate(owner)
-      if (!candidate.ok) return candidate.outbox ?? candidate
+      if (!candidate.ok) return candidate
       const issue = preflightActions(ctx, candidate.actions, exec.agent)
       if (issue !== undefined) {
         return {

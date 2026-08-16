@@ -127,3 +127,25 @@ test('unstaging preserves action identity and invalidates the prior review', () 
   assert.deepEqual(restaged.actions.map(action => action.id), ['action-1', 'action-3'])
   assert.equal(ledger.unstage(owner, 'action-2').code, 'unknown_action')
 })
+
+test('pending batches expire without dispatch and a new batch can replace them', () => {
+  let now = 1_000
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3, maxPendingMs: 50, now: () => now })
+  const opened = ledger.begin(owner, 'short lease')
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'stale' } })
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+  assert.equal(reviewed.created_at, '1970-01-01T00:00:01.000Z')
+  assert.equal(reviewed.expires_at, '1970-01-01T00:00:01.050Z')
+
+  now = 1_050
+  const expired = ledger.inspect(owner)
+  assert.equal(expired.phase, 'expired')
+  assert.equal(expired.reviewed, false)
+  assert.equal(ledger.beginCommit(owner, reviewed.digest).code, 'outbox_expired')
+
+  const replacement = ledger.begin(owner, 'fresh lease')
+  assert.notEqual(replacement.outbox_id, opened.outbox_id)
+  assert.equal(replacement.action_count, 0)
+})

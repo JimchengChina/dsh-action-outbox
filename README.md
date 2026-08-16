@@ -48,6 +48,7 @@ The default permits any visible non-internal tool to be staged, requires approva
     enforce: ['github_create_*', 'github_update_*', 'slack_send', 'deploy_*']
     requireApproval: true
     rejectDuplicateActions: true
+    maxPendingMs: 1800000
     maxActions: 20
     maxArgumentBytes: 65536
     resultPreviewChars: 2000
@@ -59,6 +60,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - `enforce`: wildcard patterns that reject direct calls and require the transactional route. Empty by default for compatibility.
 - `requireApproval`: ask once for the exact reviewed batch. Without an approval service, commit fails closed.
 - `rejectDuplicateActions`: reject repeated target-name/argument pairs that could otherwise duplicate a write. Disable only when repetition is intentional.
+- `maxPendingMs`: expire an uncommitted batch after this many milliseconds so old intent cannot receive a fresh approval. The default is 30 minutes; `0` disables expiry.
 - `maxActions` / `maxArgumentBytes`: bound retained in-memory state.
 - `resultPreviewChars` / `approvalPreviewChars`: bound model- and user-facing receipts.
 
@@ -75,6 +77,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - **No automatic retry.** An external timeout can be ambiguous. Retrying automatically could duplicate a write.
 - **No false rollback promise.** Earlier successful actions survive a later failure. Inspect the receipt, reconcile externally, then discard the blocked outbox.
 - **Lifecycle-safe pending state.** The queue is deliberately in memory. Plugin unload, restart, or crash loses pending intent but cannot emit it.
+- **Bounded approval lifetime.** Open batches expire after 30 minutes by default. Expiry clears review state and performs no target dispatch.
 
 ## Limitations
 
