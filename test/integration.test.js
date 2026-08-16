@@ -62,6 +62,12 @@ test('staging has zero target side effects and commit executes in order', async 
   }))
   assert.equal(committed.phase, 'committed')
   assert.deepEqual(effects, ['one', 'two'])
+  assert.deepEqual(
+    committed.actions.map(action => action.receipt.call_id),
+    ['c1:outbox:outbox-1:action-1', 'c1:outbox:outbox-1:action-2'],
+  )
+  assert.ok(committed.actions.every(action => action.receipt.duration_ms >= 0))
+  assert.ok(committed.actions.every(action => action.receipt.started_at.endsWith('Z')))
   await ctx.root.fiber.dispose()
 })
 
@@ -211,6 +217,7 @@ test('commit stops on first failure and keeps a non-retryable partial receipt', 
   assert.equal(commit.code, 'action_failed')
   assert.equal(commit.outbox.phase, 'blocked')
   assert.deepEqual(commit.outbox.actions.map(action => action.status), ['succeeded', 'failed'])
+  assert.equal(commit.outbox.actions[1].receipt.call_id, 'c1:outbox:outbox-1:action-2')
   assert.deepEqual(effects, ['done'])
 
   const retry = valueOf(await call(ctx, 'c2', 'action_outbox_commit', {

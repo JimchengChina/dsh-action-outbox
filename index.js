@@ -65,6 +65,16 @@ function preflightActions(ctx, actions, agent) {
   return undefined
 }
 
+function dispatchMetadata(callId, startedAt) {
+  const finishedAt = Date.now()
+  return {
+    call_id: callId,
+    started_at: new Date(startedAt).toISOString(),
+    finished_at: new Date(finishedAt).toISOString(),
+    duration_ms: Math.max(0, finishedAt - startedAt),
+  }
+}
+
 export function apply(ctx, inputConfig = {}) {
   const config = resolveConfig(inputConfig)
   const policy = compilePolicy(config)
@@ -255,6 +265,7 @@ export function apply(ctx, inputConfig = {}) {
 
           let result
           const callId = `${exec.callId}:outbox:${started.state.id}:${action.id}`
+          const startedAt = Date.now()
           commitDispatches.set(exec.token, { callId, name: action.tool })
           try {
             result = await ctx.tools.execute({
@@ -270,6 +281,8 @@ export function apply(ctx, inputConfig = {}) {
             const receipt = {
               ok: false,
               error: error instanceof Error ? error.message : String(error),
+              ...(error instanceof Error ? { error_name: error.name } : {}),
+              ...dispatchMetadata(callId, startedAt),
             }
             ledger.block(owner, action.id, receipt)
             return {
@@ -282,7 +295,11 @@ export function apply(ctx, inputConfig = {}) {
             commitDispatches.delete(exec.token)
           }
 
-          const receipt = resultReceipt(result, config.resultPreviewChars)
+          const receipt = resultReceipt(
+            result,
+            config.resultPreviewChars,
+            dispatchMetadata(callId, startedAt),
+          )
           if (!receipt.ok) {
             ledger.block(owner, action.id, receipt)
             return {

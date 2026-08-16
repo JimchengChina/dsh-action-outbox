@@ -6,6 +6,7 @@ import {
   compilePolicy,
   OutboxLedger,
   resolveConfig,
+  resultReceipt,
   utf8Bytes,
 } from '../lib/outbox.js'
 
@@ -148,4 +149,21 @@ test('pending batches expire without dispatch and a new batch can replace them',
   const replacement = ledger.begin(owner, 'fresh lease')
   assert.notEqual(replacement.outbox_id, opened.outbox_id)
   assert.equal(replacement.action_count, 0)
+})
+
+test('result receipts retain structured DSH error identity and audit metadata', () => {
+  const receipt = resultReceipt({
+    isError: true,
+    error: { message: 'denied', info: { name: 'PolicyError', code: 'DENIED' } },
+    content: [{ type: 'text', text: 'Error: denied' }],
+  }, 100, { call_id: 'call-1', duration_ms: 4 })
+  assert.deepEqual(receipt, {
+    ok: false,
+    error: 'denied',
+    error_code: 'DENIED',
+    error_name: 'PolicyError',
+    output_preview: 'Error: denied',
+    call_id: 'call-1',
+    duration_ms: 4,
+  })
 })

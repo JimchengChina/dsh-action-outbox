@@ -74,6 +74,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - **Normal controls remain active.** Committed calls re-enter DSH permissions, sandbox, hooks, guards, cancellation, and result observation.
 - **Commit authority is shallow.** Only the exact staged target call bypasses an `enforce` rule. Tool calls made by that target are not silently authorized and must pass enforcement themselves.
 - **Ordered and fail-stop.** Actions run sequentially; the first failure blocks the outbox and no later action runs.
+- **Correlatable receipts.** Every dispatched action records its deterministic nested call id, start/end timestamps, duration, and structured DSH error identity when available.
 - **No automatic retry.** An external timeout can be ambiguous. Retrying automatically could duplicate a write.
 - **No false rollback promise.** Earlier successful actions survive a later failure. Inspect the receipt, reconcile externally, then discard the blocked outbox.
 - **Lifecycle-safe pending state.** The queue is deliberately in memory. Plugin unload, restart, or crash loses pending intent but cannot emit it.
