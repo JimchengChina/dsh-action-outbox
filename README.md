@@ -23,6 +23,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 ```
 
 The package is a DSH bundle and activates itself through `cordis.patch.yml`.
+Its tools also publish DSH-native call/result presentation metadata, so capable Web, TUI, and editor clients can show concise review and commit cards without special-casing plugin tool names.
 
 ## Agent workflow
 

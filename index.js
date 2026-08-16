@@ -8,6 +8,7 @@ import {
   resultReceipt,
   utf8Bytes,
 } from './lib/outbox.js'
+import { outboxPresentation, presentationMeta } from './lib/presentation.js'
 
 export const name = 'action-outbox'
 export const inject = ['systemPrompt', 'tools']
@@ -38,7 +39,7 @@ function renderJson(_args, value) {
 }
 
 function jsonOutput() {
-  return { schema: { type: 'json' }, render: renderJson }
+  return { schema: { type: 'json' }, render: renderJson, presentationMeta: (_args, value) => presentationMeta(value) }
 }
 
 function expectedDigest(value) {
@@ -118,6 +119,7 @@ export function apply(ctx, inputConfig = {}) {
       label: { type: 'string', required: true, description: 'Short purpose of this batch.' },
     },
     output: jsonOutput(),
+    ...outboxPresentation('begin'),
     async execute(args, exec) {
       if (args.label.length > MAX_LABEL_CHARS) {
         return {
@@ -140,6 +142,7 @@ export function apply(ctx, inputConfig = {}) {
       summary: { type: 'string', description: 'Concise human-readable description of the intended side effect.' },
     },
     output: jsonOutput(),
+    ...outboxPresentation('stage'),
     async execute(args, exec) {
       if (!policy.mayStage(args.tool)) {
         return {
@@ -191,6 +194,7 @@ export function apply(ctx, inputConfig = {}) {
       action_id: { type: 'string', required: true, description: 'Exact action id returned while staging.' },
     },
     output: jsonOutput(),
+    ...outboxPresentation('unstage'),
     async execute(args, exec) {
       return ledger.unstage(ownerOf(exec), args.action_id)
     },
@@ -202,6 +206,7 @@ export function apply(ctx, inputConfig = {}) {
       'Preflight every target against the live DSH registry, then mark and return the exact staged batch and digest required by action_outbox_commit.',
     parameters: {},
     output: jsonOutput(),
+    ...outboxPresentation('review'),
     async execute(_args, exec) {
       const owner = ownerOf(exec)
       const candidate = ledger.reviewCandidate(owner)
@@ -231,6 +236,7 @@ export function apply(ctx, inputConfig = {}) {
       },
     },
     output: jsonOutput(),
+    ...outboxPresentation('commit'),
     async execute(args, exec) {
       const owner = ownerOf(exec)
       const started = ledger.beginCommit(owner, args.expected_digest)
@@ -324,6 +330,7 @@ export function apply(ctx, inputConfig = {}) {
       'Discard an open or blocked outbox. Pending staged actions have no side effects; actions already reported succeeded during a partial commit cannot be undone.',
     parameters: {},
     output: jsonOutput(),
+    ...outboxPresentation('discard'),
     async execute(_args, exec) {
       return ledger.discard(ownerOf(exec))
     },

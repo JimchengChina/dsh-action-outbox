@@ -23,6 +23,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 ```
 
 它是带 `cordis.patch.yml` 的 DSH bundle，安装后会自动加入 profile。
+工具同时提供 DSH 原生调用/结果展示元数据，因此支持该接口的 Web、TUI 和编辑器客户端可以显示简洁的审阅与提交卡片，而无需硬编码插件工具名。
 
 ## Agent 使用流程
 
