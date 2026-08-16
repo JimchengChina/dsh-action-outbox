@@ -8,6 +8,7 @@ import {
   resultReceipt,
   utf8Bytes,
 } from './lib/outbox.js'
+import { outboxPresentation, presentationMeta } from './lib/presentation.js'
 
 export const name = 'action-outbox'
 export const inject = ['systemPrompt', 'tools']
@@ -17,6 +18,8 @@ export const Config = z.object({
   exclude: z.array(z.string()).default([]),
   enforce: z.array(z.string()).default([]),
   requireApproval: z.boolean().default(true),
+  rejectDuplicateActions: z.boolean().default(true),
+  maxPendingMs: z.natural().default(30 * 60 * 1000),
   maxActions: z.natural().min(1).default(20),
   maxArgumentBytes: z.natural().min(1).default(64 * 1024),
   resultPreviewChars: z.natural().min(1).default(2_000),
@@ -36,7 +39,7 @@ function renderJson(_args, value) {
 }
 
 function jsonOutput() {
-  return { schema: { type: 'json' }, render: renderJson }
+  return { schema: { type: 'json' }, render: renderJson, presentationMeta: (_args, value) => presentationMeta(value) }
 }
 
 function expectedDigest(value) {
@@ -44,42 +47,68 @@ function expectedDigest(value) {
   return typeof value.expected_digest === 'string' ? value.expected_digest : undefined
 }
 
+function preflightActions(ctx, actions, agent) {
+  for (const action of actions) {
+    const target = ctx.tools.get(action.tool, agent)
+    const changed = target === undefined || target !== action.definition
+    const violations = target === undefined
+      ? []
+      : validateJsonSchemaValue(target.parameters, action.arguments, 'arguments')
+    if (changed || violations.length > 0) {
+      return {
+        action,
+        detail: changed
+          ? `Tool "${action.tool}" was removed or replaced after staging.`
+          : `Arguments no longer satisfy "${action.tool}": ${violations.join('; ')}`,
+      }
+    }
+  }
+  return undefined
+}
+
+function dispatchMetadata(callId, startedAt) {
+  const finishedAt = Date.now()
+  return {
+    call_id: callId,
+    started_at: new Date(startedAt).toISOString(),
+    finished_at: new Date(finishedAt).toISOString(),
+    duration_ms: Math.max(0, finishedAt - startedAt),
+  }
+}
+
 export function apply(ctx, inputConfig = {}) {
   const config = resolveConfig(inputConfig)
   const policy = compilePolicy(config)
   const ledger = new OutboxLedger(config)
-  const commitLineage = new Set()
+  const commitDispatches = new Map()
 
   ctx.systemPrompt.section({
     name: 'tool:action-outbox',
     order: 119,
     text:
       'Use the action outbox when several side-effecting tool calls should be reviewed as one batch. '
-      + 'Call action_outbox_begin, stage every action without executing it, call action_outbox_review, '
+      + 'Call action_outbox_begin, stage every action without executing it, optionally unstage mistakes, '
+      + 'then call action_outbox_review, '
       + 'then pass the exact returned digest to action_outbox_commit. Do not claim that a staged action '
       + 'has happened. Before commit, action_outbox_discard guarantees that none of the staged actions ran. '
       + 'After commit starts, external systems are not atomic: if one action fails, stop and report the '
-      + 'partial receipt instead of retrying or claiming rollback.',
+      + 'partial receipt instead of retrying or claiming rollback. Only the exact staged target is '
+      + 'authorized by a commit; nested calls still follow normal enforcement.',
   })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
-    if (exec.parent !== undefined && commitLineage.has(exec.parent)) {
-      commitLineage.add(exec.token)
-    }
     if (exec.name !== 'action_outbox_commit' || !config.requireApproval) return next()
     const digest = expectedDigest(exec.arguments)
-    const review = ledger.review(ownerOf(exec))
-    if (!review.ok || digest === undefined || review.digest !== digest) return next()
+    const review = ledger.inspect(ownerOf(exec))
+    if (!review.ok || review.phase !== 'open' || !review.reviewed
+      || digest === undefined || review.digest !== digest) return next()
     return { kind: 'ask', reason: approvalReason(review, config.approvalPreviewChars) }
-  })
-
-  ctx.on('tools/result', exec => {
-    commitLineage.delete(exec.token)
   })
 
   ctx.tools.guard(exec => {
     if (!policy.mustStage(exec.name)) return undefined
-    if (exec.parent !== undefined && commitLineage.has(exec.parent)) return undefined
+    const expected = exec.parent === undefined ? undefined : commitDispatches.get(exec.parent)
+    if (expected?.name === exec.name && expected.callId === exec.callId) return undefined
     return `Tool "${exec.name}" is configured for transactional dispatch. Stage it with action_outbox_stage and commit the reviewed batch.`
   })
 
@@ -90,6 +119,7 @@ export function apply(ctx, inputConfig = {}) {
       label: { type: 'string', required: true, description: 'Short purpose of this batch.' },
     },
     output: jsonOutput(),
+    ...outboxPresentation('begin'),
     async execute(args, exec) {
       if (args.label.length > MAX_LABEL_CHARS) {
         return {
@@ -112,6 +142,7 @@ export function apply(ctx, inputConfig = {}) {
       summary: { type: 'string', description: 'Concise human-readable description of the intended side effect.' },
     },
     output: jsonOutput(),
+    ...outboxPresentation('stage'),
     async execute(args, exec) {
       if (!policy.mayStage(args.tool)) {
         return {
@@ -156,11 +187,39 @@ export function apply(ctx, inputConfig = {}) {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'action_outbox_unstage',
+    description:
+      'Remove one pending action from the open outbox without executing it. Action ids remain stable and the changed batch must be reviewed again.',
+    parameters: {
+      action_id: { type: 'string', required: true, description: 'Exact action id returned while staging.' },
+    },
+    output: jsonOutput(),
+    ...outboxPresentation('unstage'),
+    async execute(args, exec) {
+      return ledger.unstage(ownerOf(exec), args.action_id)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'action_outbox_review',
-    description: 'Return the exact staged batch, statuses, and digest required by action_outbox_commit.',
+    description:
+      'Preflight every target against the live DSH registry, then mark and return the exact staged batch and digest required by action_outbox_commit.',
     parameters: {},
     output: jsonOutput(),
+    ...outboxPresentation('review'),
     async execute(_args, exec) {
+      const owner = ownerOf(exec)
+      const candidate = ledger.reviewCandidate(owner)
+      if (!candidate.ok) return candidate
+      const issue = preflightActions(ctx, candidate.actions, exec.agent)
+      if (issue !== undefined) {
+        return {
+          ok: false,
+          code: 'review_preflight_failed',
+          message: `${issue.detail} Restage the action before requesting approval.`,
+          outbox: ledger.inspect(owner),
+        }
+      }
       return ledger.review(ownerOf(exec))
     },
   }))
@@ -177,6 +236,7 @@ export function apply(ctx, inputConfig = {}) {
       },
     },
     output: jsonOutput(),
+    ...outboxPresentation('commit'),
     async execute(args, exec) {
       const owner = ownerOf(exec)
       const started = ledger.beginCommit(owner, args.expected_digest)
@@ -185,27 +245,17 @@ export function apply(ctx, inputConfig = {}) {
       // Validate the whole batch against the exact definitions captured while
       // staging before the first side effect. HMR or schema drift cannot turn a
       // previously reviewed name/argument pair into a different capability.
-      for (const action of started.actions) {
-        const target = ctx.tools.get(action.tool, exec.agent)
-        const changed = target === undefined || target !== action.definition
-        const violations = target === undefined
-          ? []
-          : validateJsonSchemaValue(target.parameters, action.arguments, 'arguments')
-        if (changed || violations.length > 0) {
-          const detail = changed
-            ? `Tool "${action.tool}" was removed or replaced after staging.`
-            : `Arguments no longer satisfy "${action.tool}": ${violations.join('; ')}`
-          ledger.block(owner, action.id, { ok: false, error: detail })
-          return {
-            ok: false,
-            code: 'commit_preflight_failed',
-            message: `${detail} No target action was dispatched.`,
-            outbox: ledger.review(owner),
-          }
+      const issue = preflightActions(ctx, started.actions, exec.agent)
+      if (issue !== undefined) {
+        ledger.block(owner, issue.action.id, { ok: false, error: issue.detail })
+        return {
+          ok: false,
+          code: 'commit_preflight_failed',
+          message: `${issue.detail} No target action was dispatched.`,
+          outbox: ledger.review(owner),
         }
       }
 
-      commitLineage.add(exec.token)
       try {
         for (const action of started.actions) {
           if (exec.signal.aborted) {
@@ -220,9 +270,12 @@ export function apply(ctx, inputConfig = {}) {
           }
 
           let result
+          const callId = `${exec.callId}:outbox:${started.state.id}:${action.id}`
+          const startedAt = Date.now()
+          commitDispatches.set(exec.token, { callId, name: action.tool })
           try {
             result = await ctx.tools.execute({
-              callId: `${exec.callId}:outbox:${started.state.id}:${action.id}`,
+              callId,
               rootCallId: exec.rootCallId,
               name: action.tool,
               arguments: action.arguments,
@@ -234,6 +287,8 @@ export function apply(ctx, inputConfig = {}) {
             const receipt = {
               ok: false,
               error: error instanceof Error ? error.message : String(error),
+              ...(error instanceof Error ? { error_name: error.name } : {}),
+              ...dispatchMetadata(callId, startedAt),
             }
             ledger.block(owner, action.id, receipt)
             return {
@@ -242,9 +297,15 @@ export function apply(ctx, inputConfig = {}) {
               message: 'Commit stopped. Earlier successful actions were not rolled back.',
               outbox: ledger.review(owner),
             }
+          } finally {
+            commitDispatches.delete(exec.token)
           }
 
-          const receipt = resultReceipt(result, config.resultPreviewChars)
+          const receipt = resultReceipt(
+            result,
+            config.resultPreviewChars,
+            dispatchMetadata(callId, startedAt),
+          )
           if (!receipt.ok) {
             ledger.block(owner, action.id, receipt)
             return {
@@ -258,7 +319,7 @@ export function apply(ctx, inputConfig = {}) {
         }
         return ledger.finish(owner)
       } finally {
-        commitLineage.delete(exec.token)
+        commitDispatches.delete(exec.token)
       }
     },
   }))
@@ -269,6 +330,7 @@ export function apply(ctx, inputConfig = {}) {
       'Discard an open or blocked outbox. Pending staged actions have no side effects; actions already reported succeeded during a partial commit cannot be undone.',
     parameters: {},
     output: jsonOutput(),
+    ...outboxPresentation('discard'),
     async execute(_args, exec) {
       return ledger.discard(ownerOf(exec))
     },

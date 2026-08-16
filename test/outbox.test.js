@@ -6,6 +6,7 @@ import {
   compilePolicy,
   OutboxLedger,
   resolveConfig,
+  resultReceipt,
   utf8Bytes,
 } from '../lib/outbox.js'
 
@@ -40,7 +41,8 @@ test('ledger requires an exact reviewed digest and never repeats a completed bat
   const mismatch = ledger.beginCommit(owner, 'sha256:not-the-review')
   assert.equal(mismatch.code, 'digest_mismatch')
 
-  const started = ledger.beginCommit(owner, staged.digest)
+  const review = ledger.review(owner)
+  const started = ledger.beginCommit(owner, review.digest)
   assert.equal(started.ok, true)
   ledger.markSucceeded(owner, 'action-1', { ok: true, output_preview: 'done' })
   const finished = ledger.finish(owner)
@@ -53,6 +55,7 @@ test('a failed commit is blocked and cannot be retried accidentally', () => {
   const ledger = new OutboxLedger({ maxActions: 3 })
   ledger.begin(owner, 'publish')
   const review = ledger.stage(owner, { tool: 'publish', arguments: { id: 1 } })
+  ledger.review(owner)
   ledger.beginCommit(owner, review.digest)
   ledger.block(owner, 'action-1', { ok: false, error: 'timeout' })
   const blocked = ledger.review(owner)
@@ -60,6 +63,18 @@ test('a failed commit is blocked and cannot be retried accidentally', () => {
   assert.equal(blocked.actions[0].status, 'failed')
   assert.equal(ledger.beginCommit(owner, blocked.digest).code, 'outbox_not_open')
   assert.equal(ledger.discard(owner).external_actions_executed, 0)
+})
+
+test('ledger will not treat a staged digest as evidence of review', () => {
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3 })
+  ledger.begin(owner, 'explicit review')
+  const staged = ledger.stage(owner, { tool: 'publish', arguments: { id: 1 } })
+  assert.equal(staged.reviewed, false)
+  assert.equal(ledger.beginCommit(owner, staged.digest).code, 'review_required')
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+  assert.equal(ledger.beginCommit(owner, reviewed.digest).ok, true)
 })
 
 test('limits use UTF-8 bytes and approval previews remain bounded', () => {
@@ -71,4 +86,84 @@ test('limits use UTF-8 bytes and approval previews remain bounded', () => {
   const reason = approvalReason(ledger.review(owner), 80)
   assert.ok(reason.length < 120)
   assert.equal(review.action_count, 0)
+})
+
+test('duplicate target calls are rejected by default and can be allowed explicitly', () => {
+  const owner = {}
+  const guarded = new OutboxLedger({ maxActions: 3 })
+  guarded.begin(owner, 'deduplicate')
+  guarded.stage(owner, { tool: 'send', arguments: { b: 2, a: 1 }, summary: 'first' })
+  const duplicate = guarded.stage(owner, {
+    tool: 'send', arguments: { a: 1, b: 2 }, summary: 'same effect',
+  })
+  assert.equal(duplicate.code, 'duplicate_action')
+  assert.equal(duplicate.duplicate_of, 'action-1')
+  assert.equal(guarded.inspect(owner).action_count, 1)
+
+  const allowedOwner = {}
+  const allowed = new OutboxLedger({ maxActions: 3, rejectDuplicateActions: false })
+  allowed.begin(allowedOwner, 'repeat intentionally')
+  allowed.stage(allowedOwner, { tool: 'send', arguments: { value: 'x' } })
+  assert.equal(allowed.stage(allowedOwner, {
+    tool: 'send', arguments: { value: 'x' },
+  }).action_count, 2)
+})
+
+test('unstaging preserves action identity and invalidates the prior review', () => {
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3 })
+  ledger.begin(owner, 'editable batch')
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'keep' } })
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'remove' } })
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+
+  const changed = ledger.unstage(owner, 'action-2')
+  assert.equal(changed.removed_action.id, 'action-2')
+  assert.equal(changed.reviewed, false)
+  assert.deepEqual(changed.actions.map(action => action.id), ['action-1'])
+  assert.equal(ledger.beginCommit(owner, changed.digest).code, 'review_required')
+
+  const restaged = ledger.stage(owner, { tool: 'send', arguments: { value: 'replacement' } })
+  assert.deepEqual(restaged.actions.map(action => action.id), ['action-1', 'action-3'])
+  assert.equal(ledger.unstage(owner, 'action-2').code, 'unknown_action')
+})
+
+test('pending batches expire without dispatch and a new batch can replace them', () => {
+  let now = 1_000
+  const owner = {}
+  const ledger = new OutboxLedger({ maxActions: 3, maxPendingMs: 50, now: () => now })
+  const opened = ledger.begin(owner, 'short lease')
+  ledger.stage(owner, { tool: 'send', arguments: { value: 'stale' } })
+  const reviewed = ledger.review(owner)
+  assert.equal(reviewed.reviewed, true)
+  assert.equal(reviewed.created_at, '1970-01-01T00:00:01.000Z')
+  assert.equal(reviewed.expires_at, '1970-01-01T00:00:01.050Z')
+
+  now = 1_050
+  const expired = ledger.inspect(owner)
+  assert.equal(expired.phase, 'expired')
+  assert.equal(expired.reviewed, false)
+  assert.equal(ledger.beginCommit(owner, reviewed.digest).code, 'outbox_expired')
+
+  const replacement = ledger.begin(owner, 'fresh lease')
+  assert.notEqual(replacement.outbox_id, opened.outbox_id)
+  assert.equal(replacement.action_count, 0)
+})
+
+test('result receipts retain structured DSH error identity and audit metadata', () => {
+  const receipt = resultReceipt({
+    isError: true,
+    error: { message: 'denied', info: { name: 'PolicyError', code: 'DENIED' } },
+    content: [{ type: 'text', text: 'Error: denied' }],
+  }, 100, { call_id: 'call-1', duration_ms: 4 })
+  assert.deepEqual(receipt, {
+    ok: false,
+    error: 'denied',
+    error_code: 'DENIED',
+    error_name: 'PolicyError',
+    output_preview: 'Error: denied',
+    call_id: 'call-1',
+    duration_ms: 4,
+  })
 })

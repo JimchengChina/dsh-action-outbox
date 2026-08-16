@@ -1,6 +1,6 @@
 {
   "name": "dsh-action-outbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Review-before-commit transactions for DeepSeek Harness tool side effects",
   "keywords": [
     "deepseek-harness",
@@ -22,11 +22,14 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh-CN.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "docs",
+    "examples",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check lib/outbox.js",
+    "check": "node --check index.js && node --check lib/outbox.js && node --check lib/presentation.js",
     "test": "node --test",
     "verify": "pnpm run check && pnpm test"
   },
@@ -48,7 +51,7 @@
   },
   "homepage": "https://github.com/JimchengChina/dsh-action-outbox#readme",
   "peerDependencies": {
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
