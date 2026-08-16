@@ -81,7 +81,7 @@ ordered commit -> success -> close
                -> first failure -> block, preserve receipt, never auto-retry
 ```
 
-The commit tool dispatches each target as a nested DSH call. This preserves the visible agent scope and re-enters pre-execute policy, guards, approval, sandbox, hooks, cancellation and final result observation. A lineage token allows only calls beneath the active commit to pass optional `enforce` rules, including nested calls made by a composite target tool.
+The commit tool dispatches each target as a nested DSH call. This preserves the visible agent scope and re-enters pre-execute policy, guards, approval, sandbox, hooks, cancellation and final result observation. The optional `enforce` exception is deliberately shallow: it matches only the exact direct target name and call id beneath the active commit. Calls made by a composite target are not part of the reviewed batch and receive no inherited authorization.
 
 ## Rejected alternatives
 

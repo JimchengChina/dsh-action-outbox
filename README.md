@@ -67,6 +67,7 @@ The default permits any visible non-internal tool to be staged, requires approva
 - **TOCTOU protection.** Commit requires the latest full SHA-256 batch digest.
 - **Whole-batch preflight.** Target arguments are checked while staging, and commit rejects the entire batch before its first side effect if a target tool was removed, hot-reloaded, or changed identity.
 - **Normal controls remain active.** Committed calls re-enter DSH permissions, sandbox, hooks, guards, cancellation, and result observation.
+- **Commit authority is shallow.** Only the exact staged target call bypasses an `enforce` rule. Tool calls made by that target are not silently authorized and must pass enforcement themselves.
 - **Ordered and fail-stop.** Actions run sequentially; the first failure blocks the outbox and no later action runs.
 - **No automatic retry.** An external timeout can be ambiguous. Retrying automatically could duplicate a write.
 - **No false rollback promise.** Earlier successful actions survive a later failure. Inspect the receipt, reconcile externally, then discard the blocked outbox.

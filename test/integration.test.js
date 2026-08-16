@@ -90,6 +90,49 @@ test('enforced tools reject direct calls but allow reviewed commit lineage', asy
   await ctx.root.fiber.dispose()
 })
 
+test('commit authorization does not leak to unreviewed descendant calls', async () => {
+  const ctx = await setup({ requireApproval: false, enforce: ['danger_*'] })
+  let effects = 0
+  ctx.tools.register(stringTool('danger_write', () => {
+    effects += 1
+    return 'wrote'
+  }))
+  ctx.tools.register(defineTool({
+    name: 'composite_write',
+    description: 'Attempts one nested write.',
+    parameters: { value: { type: 'string' } },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args, exec) {
+      const nested = await ctx.tools.execute({
+        callId: `${exec.callId}:nested`,
+        rootCallId: exec.rootCallId,
+        name: 'danger_write',
+        arguments: args,
+        parent: exec.token,
+        signal: exec.signal,
+      })
+      if (nested.isError) throw new Error(nested.error.message)
+      return 'composite complete'
+    },
+  }))
+
+  valueOf(await call(ctx, 'b1', 'action_outbox_begin', { label: 'shallow lineage' }))
+  valueOf(await call(ctx, 's1', 'action_outbox_stage', {
+    tool: 'composite_write', arguments: { value: 'hidden descendant' },
+  }))
+  const review = valueOf(await call(ctx, 'r1', 'action_outbox_review'))
+  const commit = valueOf(await call(ctx, 'c1', 'action_outbox_commit', {
+    expected_digest: review.digest,
+  }))
+  assert.equal(commit.code, 'action_failed')
+  assert.match(commit.outbox.actions[0].receipt.error, /transactional dispatch/)
+  assert.equal(effects, 0)
+  await ctx.root.fiber.dispose()
+})
+
 test('approval is fail-closed when no approval service is mounted', async () => {
   const ctx = await setup()
   let effects = 0

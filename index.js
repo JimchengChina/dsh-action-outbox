@@ -67,7 +67,7 @@ export function apply(ctx, inputConfig = {}) {
   const config = resolveConfig(inputConfig)
   const policy = compilePolicy(config)
   const ledger = new OutboxLedger(config)
-  const commitLineage = new Set()
+  const commitDispatches = new Map()
 
   ctx.systemPrompt.section({
     name: 'tool:action-outbox',
@@ -78,13 +78,11 @@ export function apply(ctx, inputConfig = {}) {
       + 'then pass the exact returned digest to action_outbox_commit. Do not claim that a staged action '
       + 'has happened. Before commit, action_outbox_discard guarantees that none of the staged actions ran. '
       + 'After commit starts, external systems are not atomic: if one action fails, stop and report the '
-      + 'partial receipt instead of retrying or claiming rollback.',
+      + 'partial receipt instead of retrying or claiming rollback. Only the exact staged target is '
+      + 'authorized by a commit; nested calls still follow normal enforcement.',
   })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
-    if (exec.parent !== undefined && commitLineage.has(exec.parent)) {
-      commitLineage.add(exec.token)
-    }
     if (exec.name !== 'action_outbox_commit' || !config.requireApproval) return next()
     const digest = expectedDigest(exec.arguments)
     const review = ledger.inspect(ownerOf(exec))
@@ -92,13 +90,10 @@ export function apply(ctx, inputConfig = {}) {
     return { kind: 'ask', reason: approvalReason(review, config.approvalPreviewChars) }
   })
 
-  ctx.on('tools/result', exec => {
-    commitLineage.delete(exec.token)
-  })
-
   ctx.tools.guard(exec => {
     if (!policy.mustStage(exec.name)) return undefined
-    if (exec.parent !== undefined && commitLineage.has(exec.parent)) return undefined
+    const expected = exec.parent === undefined ? undefined : commitDispatches.get(exec.parent)
+    if (expected?.name === exec.name && expected.callId === exec.callId) return undefined
     return `Tool "${exec.name}" is configured for transactional dispatch. Stage it with action_outbox_stage and commit the reviewed batch.`
   })
 
@@ -228,7 +223,6 @@ export function apply(ctx, inputConfig = {}) {
         }
       }
 
-      commitLineage.add(exec.token)
       try {
         for (const action of started.actions) {
           if (exec.signal.aborted) {
@@ -243,9 +237,11 @@ export function apply(ctx, inputConfig = {}) {
           }
 
           let result
+          const callId = `${exec.callId}:outbox:${started.state.id}:${action.id}`
+          commitDispatches.set(exec.token, { callId, name: action.tool })
           try {
             result = await ctx.tools.execute({
-              callId: `${exec.callId}:outbox:${started.state.id}:${action.id}`,
+              callId,
               rootCallId: exec.rootCallId,
               name: action.tool,
               arguments: action.arguments,
@@ -265,6 +261,8 @@ export function apply(ctx, inputConfig = {}) {
               message: 'Commit stopped. Earlier successful actions were not rolled back.',
               outbox: ledger.review(owner),
             }
+          } finally {
+            commitDispatches.delete(exec.token)
           }
 
           const receipt = resultReceipt(result, config.resultPreviewChars)
@@ -281,7 +279,7 @@ export function apply(ctx, inputConfig = {}) {
         }
         return ledger.finish(owner)
       } finally {
-        commitLineage.delete(exec.token)
+        commitDispatches.delete(exec.token)
       }
     },
   }))
