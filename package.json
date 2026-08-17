@@ -1,7 +1,7 @@
 {
   "name": "dsh-action-outbox",
-  "version": "0.2.0",
-  "description": "Review-before-commit transactions for DeepSeek Harness tool side effects",
+  "version": "0.3.0",
+  "description": "Durable batch review and commit safety for DeepSeek Harness tool side effects",
   "keywords": [
     "deepseek-harness",
     "dsh-plugin",
@@ -13,11 +13,13 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./lib/client.js",
     "./core": "./lib/outbox.js",
     "./package.json": "./package.json"
   },
   "files": [
     "index.js",
+    "client.js",
     "lib",
     "cordis.patch.yml",
     "README.md",
@@ -29,11 +31,20 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check lib/outbox.js && node --check lib/presentation.js",
+    "build": "node scripts/build-client.mjs",
+    "check": "node --check index.js && node --check client.js && node --check lib/client.js && node --check lib/outbox.js && node --check lib/persistence.js && node --check lib/presentation.js",
+    "prepare": "pnpm run build",
     "test": "node --test",
-    "verify": "pnpm run check && pnpm test"
+    "verify": "pnpm run build && pnpm run check && pnpm test"
   },
   "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
@@ -52,14 +63,17 @@
   "homepage": "https://github.com/JimchengChina/dsh-action-outbox#readme",
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1",
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "esbuild": "0.25.12"
   },
+  "packageManager": "pnpm@11.7.0",
   "publishConfig": {
     "access": "public"
   }

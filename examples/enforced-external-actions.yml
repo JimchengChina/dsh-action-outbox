@@ -19,6 +19,8 @@
       - deploy_*
     requireApproval: true
     rejectDuplicateActions: true
+    persistPending: true
+    stateFile: ''
     maxPendingMs: 1800000
     maxActions: 20
     maxArgumentBytes: 65536
