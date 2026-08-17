@@ -1,44 +1,70 @@
 # dsh-action-outbox
 
-把多次有外部副作用的 DeepSeek Harness 工具调用暂存为一个不可变批次，统一审阅后再提交或丢弃。
+面向 DeepSeek Harness 外部副作用的持久化 **Batch Review Inbox**：先暂存准确调用，查看或编辑完整 canonical JSON，再一次性批准不可变批次。
 
-它实现的是工具的**输出提交边界**：暂存时只记录工具名和完整 JSON 参数，不执行目标工具；审阅会返回 SHA-256 摘要；提交只接受这份准确摘要，默认对整批动作请求一次人工批准，再按顺序让每个目标调用重新进入 DSH 原有工具流水线。
+暂存不会调用目标工具。Review 会重新解析当前策略、工具身份、schema 与参数，返回 SHA-256 digest 和一次性 approval nonce；Commit 只接受这一对凭据，并按顺序让每个动作重新进入 DSH 原有工具流水线。
 
 ## 为什么需要它
 
-Worktree 和文件 checkpoint 能恢复本地代码，却无法撤回已经发出的 Issue 评论、邮件、部署或付款。DeepSeek Harness 所依据的 Cordis 论文把这个系统边界讲得很明确：外部输出要么延迟到提交点，要么使用领域专属的补偿动作。本插件实现前者——**提交前不发出任何外部动作**——同时不把多个外部系统伪装成原子事务。
+Worktree 和文件 checkpoint 能恢复本地代码，却无法撤回已经发出的 Issue 评论、邮件、部署或付款。DeepSeek Harness 所依据的 Cordis 论文把这个系统边界讲得很明确：外部输出要么延迟到提交点，要么使用领域专属补偿。本插件实现前者——**提交前不发出任何外部动作**——同时不把多个外部系统伪装成原子事务。
+
+## v0.3 新增能力
+
+- DSH Web 侧栏内的 Batch Review Inbox：显示完整参数、参数字节数、工具来源、工具指纹、action hash，并支持复制和下载。
+- `action_outbox_replace`：可修改已暂存动作的工具、参数或摘要；编辑会立即作废旧 digest、nonce、review 与 approval。
+- 超长审查安全门禁：被截断的审批卡片不能单独授权提交，必须先在 Inbox 中查看并确认完整内容。
+- `0600` 权限的持久化待提交状态：重启后只恢复为 `needs_reapproval`，清除旧审批状态，并重新检查当前策略、工具与 schema。
+- 提交崩溃恢复：提交中断后进入 `recovery_required`；没有确定成功回执的动作标记为 `ambiguous`，绝不自动重试。
+- Inbox 内置 **Copy safe demo prompt** 安全体验入口；过期批次进入历史区，不再占用待办角标，同时保留检查和清理入口。
 
 ## 安装
 
-安装 GitHub 上带版本标签的发布：
+安装带版本标签的 GitHub 发布：
 
 ```sh
-dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.2.0
+dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.3.0
 ```
 
-或者从本地 checkout 安装：
+或从本地 checkout 安装：
 
 ```sh
 dsh plugin --profile web add ./dsh-action-outbox
 ```
 
-它是带 `cordis.patch.yml` 的 DSH bundle，安装后会自动加入 profile。
-工具同时提供 DSH 原生调用/结果展示元数据，因此支持该接口的 Web、TUI 和编辑器客户端可以显示简洁的审阅与提交卡片，而无需硬编码插件工具名。
+它是带 `cordis.patch.yml` 的 DSH bundle。浏览器端只使用 DSH 官方 `sidebar.footer.action` 和 `shell.overlay` 槽位。
+
+第一次体验时，打开左下角 **Outbox**，点击 **Copy safe demo prompt**，把生成的文字粘贴到全新 DSH 会话。它只会暂存一个 `/private/tmp` 下的 no-clobber 文件写入，Review 后立即停止，不访问网络。过期批次默认不计入待办数量；点击 **Show expired history** 仍可查看或丢弃。
 
 ## Agent 使用流程
 
 1. `action_outbox_begin({ label })`
 2. 一次或多次 `action_outbox_stage({ tool, arguments, summary? })`
-3. 如有错误，可调用 `action_outbox_unstage({ action_id })` 删除单个动作
+3. 可调用 `action_outbox_unstage({ action_id })` 删除，或调用 `action_outbox_replace({ action_id, tool?, arguments?, summary? })` 修改
 4. `action_outbox_review()`
-5. 核对动作，并复制完整 `digest`
-6. `action_outbox_commit({ expected_digest: digest })`，或调用 `action_outbox_discard()`
+5. 在 Batch Review Inbox 核对完整批次；若审批预览被截断，须在这里确认完整内容
+6. 在 Inbox 编辑后点击 **Run fresh review**；批次变为 reviewed 后，该按钮会被 **Next: copy exact commit prompt** 取代。点击复制并粘贴到对话；仅在 Inbox 发生的 Review 不会自动进入聊天历史
+7. `action_outbox_commit({ expected_digest: digest, approval_nonce })`，或调用 `action_outbox_discard()`
 
-提交前丢弃可以保证目标动作一个都没执行。暂存内容有任何变化，摘要都会变化，旧审阅结果不能被提交。
+不要在 Inbox Review 后只告诉 Agent“使用最近一次 Review”。模型眼中的最近一次 Review 可能仍是聊天历史里旧的 `action_outbox_review` 工具结果。正确做法是粘贴 Inbox 生成的精确提交指令，或要求 Agent 在对话里调用 `action_outbox_review`，并立即提交该工具刚返回的 digest 和 nonce。
+
+Commit 开始之前，Discard 能保证暂存的目标动作一个都没执行。任何批次修改都会生成新的授权状态，即使调用方仍保留旧 digest 或 nonce 也无法提交。
+
+## 重启协议
+
+```text
+open -> reviewed -> restart -> needs_reapproval
+                              -> 重新解析当前策略/工具/schema
+                              -> 新 digest + 新一次性 nonce
+                              -> approve -> committing
+
+committing -> crash -> recovery_required
+                       -> 未确认结果的调用标记为 ambiguous
+                       -> 永不自动恢复或重试
+```
+
+持久化记录绑定 DSH agent/session owner，并在 DSH 提供时记录 workspace。重启不会自动提交，不会复用审批 nonce，也不会把磁盘里保存的旧工具对象当成当前授权。
 
 ## 配置
-
-默认允许暂存任意当前可见的非内部工具、提交时要求审批，但不会强迫普通工具走暂存流程。
 
 ```yaml
 - id: action-outbox
@@ -49,6 +75,8 @@ dsh plugin --profile web add ./dsh-action-outbox
     enforce: ['github_create_*', 'github_update_*', 'slack_send', 'deploy_*']
     requireApproval: true
     rejectDuplicateActions: true
+    persistPending: true
+    stateFile: ''
     maxPendingMs: 1800000
     maxActions: 20
     maxArgumentBytes: 65536
@@ -58,40 +86,43 @@ dsh plugin --profile web add ./dsh-action-outbox
 
 - `include`：允许暂存的工具通配模式。
 - `exclude`：暂存与强制策略共同使用的例外。
-- `enforce`：匹配的工具禁止直接调用，必须走暂存与提交；为兼容现有部署，默认空数组。
-- `requireApproval`：对准确审阅过的批次只审批一次；没有审批服务时会安全拒绝。
-- `rejectDuplicateActions`：拒绝工具名和参数完全相同的重复动作，避免意外重复写入；确实需要重复时才关闭。
-- `maxPendingMs`：超过指定毫秒数后使未提交批次过期，避免旧意图获得新审批；默认 30 分钟，设为 `0` 可关闭。
-- `maxActions` / `maxArgumentBytes`：限制内存中的待提交状态。
-- `resultPreviewChars` / `approvalPreviewChars`：限制回执和审批说明长度。
+- `enforce`：匹配工具禁止直接调用，必须走 Outbox；为兼容现有部署，默认空数组。
+- `requireApproval`：对最终 digest/nonce 请求一次整批审批；没有审批服务时安全拒绝。
+- `rejectDuplicateActions`：拒绝工具名和参数完全相同的重复动作；Replace 也会检查。
+- `persistPending`：持久化有界草稿和恢复回执；默认开启。
+- `stateFile`：可选路径；空值使用 `$DSH_HOME/action-outbox/state.json`，未设置 `DSH_HOME` 时使用 `~/.dsh/action-outbox/state.json`。
+- `maxPendingMs`：未提交批次的有效期；默认 30 分钟，设为 `0` 关闭过期。
+- `maxActions` / `maxArgumentBytes`：限制持久化状态大小。
+- `resultPreviewChars`：限制模型侧结果回执长度。
+- `approvalPreviewChars`：紧凑审批卡片上限。超出时必须在 Inbox 确认完整内容；没有 Inbox 的 headless/TUI 部署需要把此值提高到足以完整显示批次，否则系统会按设计拒绝提交。
 
-只有 `*` 是通配符，其他正则符号都按普通字符匹配。
+只有 `*` 是通配符，其余正则字符都按普通字符匹配。
 
 ## 安全语义
 
-- 暂存阶段绝不调用目标工具。
-- 提交必须携带最新完整 SHA-256 摘要，避免“审阅后被换包”。
-- 暂存时校验目标参数；如果目标工具在审阅后被移除、热更新或更换身份，整批提交会在第一个副作用之前被拒绝。
-- 真正提交时，每个动作仍会经过 DSH 的权限、沙箱、hooks、guards、取消和结果观察链。
-- 提交授权只覆盖准确暂存的那次目标调用，不会传递给目标工具内部发起的其他调用；后代调用仍须独立通过强制策略。
-- 严格串行执行，首个失败立即停止，后续动作不会运行。
-- 每个已派发动作都会记录确定性的嵌套 call id、开始/结束时间、耗时，以及可用的 DSH 结构化错误标识，便于关联审计。
-- 不自动重试。外部超时可能是“执行成功但回执丢失”，自动重试会造成重复写入。
-- 不承诺虚假的跨系统回滚。前面已经成功的动作不会因为后续失败而消失。
-- 待提交队列只在内存中；插件卸载、重启或崩溃会丢弃意图，但不会意外发出动作。
-- 打开的批次默认 30 分钟后过期；过期会清除审阅状态，但绝不会执行目标动作。
+- **暂存与编辑零派发。** 只修改有界本地状态，不调用目标工具。
+- **完整审查可见性。** Inbox 保留完整 canonical JSON；紧凑卡片会明确标记截断，且不能成为唯一审批依据。
+- **TOCTOU 防护。** 在相应边界校验 digest、一次性 nonce、实时工具对象身份、结构化工具指纹、schema 和策略。
+- **修改即撤销授权。** Stage、Unstage、Replace 都清除旧 review、确认状态与 nonce。
+- **重启重新授权。** 待提交草稿只恢复为 `needs_reapproval`，通过实时 preflight 后获得新 nonce。
+- **派发前持久化。** 第一个外部调用之前先落盘 `committing`；每个成功动作完成后再持久化回执。
+- **不削弱 DSH 控制。** 提交动作仍经过权限、沙箱、hooks、guards、取消和结果观察。
+- **浅层授权。** `enforce` 例外只覆盖准确暂存的直接调用，不会传递给后代调用。
+- **严格串行、首错停止。** 不自动重试失败或恢复后状态不确定的动作。
+- **不承诺虚假回滚。** 前序成功动作不会因为后续失败而消失，也不会臆造通用补偿。
 
 ## 局限
 
 - 它不是跨工具、跨服务的分布式原子事务。
-- 目标工具报告成功后，插件不能通用地撤销该动作。
-- 目标工具自己的审批策略在提交期间仍可能再次询问；整批审批不会削弱工具所有者的原有策略。
-- 暂存参数会进入工具调用和会话历史；不要通过参数传递原工具本就不应暴露的秘密。
-- 强制策略只约束 DSH 工具注册表中的调用，不能隔离恶意的同进程插件。
-- 后续规划依赖返回值的读取类工具，应正常调用，不应暂存。
+- 无法通用撤销已成功动作，也无法仅凭超时判断外部写入是否发生。
+- 目标工具自己的审批策略仍然有效，因此 Commit 期间可能再次询问。
+- 参数会出现在 DSH 工具/会话历史中；开启持久化后也会写入本地 `0600` 文件。不要暂存原工具本就不应暴露的秘密。
+- 工具指纹覆盖声明的名称、描述、schema 与 timeout，用于发现结构漂移；它不是对插件实现代码或来源的密码学签名。
+- Inbox 继承 DSH Web 的访问边界，不额外提供独立多用户认证。
+- Enforcement 只覆盖 DSH 工具注册表调用，不是针对恶意同进程代码的沙箱。
+- 后续规划依赖返回值的读取工具应正常调用，不应暂存。
 
-功能对比、重复项目扫描和论文依据见[研究说明](docs/research.md)。
-部署假设和滥用场景见[安全策略与威胁模型](SECURITY.md)，更严格的起步配置见 [`examples/enforced-external-actions.yml`](examples/enforced-external-actions.yml)。
+功能对比、重复项目扫描和论文依据见[研究说明](docs/research.md)；共享主机部署前请阅读[安全策略与威胁模型](SECURITY.md)。
 
 ## 开发
 
@@ -99,5 +130,7 @@ dsh plugin --profile web add ./dsh-action-outbox
 pnpm install
 pnpm verify
 ```
+
+`pnpm build` 会在 `lib/client.js` 生成 DSH 模块加载器产物；根目录的 `client.js` 是浏览器端源码输入，不会被直接提供给 Web 页面。
 
 MIT
