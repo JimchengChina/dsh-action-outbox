@@ -1,8 +1,14 @@
+<p align="center">
+  <img src="assets/action-outbox-hero.jpg" alt="Action Outbox — Review first. Commit once." width="100%">
+</p>
+
 # dsh-action-outbox
 
 Durable **Batch Review Inbox** for DeepSeek Harness tool side effects: stage exact calls, inspect or edit their complete canonical JSON, then approve one immutable batch.
 
 Staging never calls the target. Review re-resolves live policy, tool identity, schema, and arguments, then returns a SHA-256 digest plus a single-use approval nonce. Commit accepts only that pair and dispatches each action through the normal DSH tool pipeline in order.
+
+If you want DSH agents to remain fast while making external writes deliberate and inspectable, consider starring the repository—it helps other DSH users discover the plugin.
 
 ## Why
 

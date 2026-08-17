@@ -20,6 +20,7 @@
   "files": [
     "index.js",
     "client.js",
+    "assets",
     "lib",
     "cordis.patch.yml",
     "README.md",

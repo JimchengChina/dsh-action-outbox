@@ -1,8 +1,14 @@
+<p align="center">
+  <img src="assets/action-outbox-hero.jpg" alt="Action Outbox — 先审查，只提交一次" width="100%">
+</p>
+
 # dsh-action-outbox
 
 面向 DeepSeek Harness 外部副作用的持久化 **Batch Review Inbox**：先暂存准确调用，查看或编辑完整 canonical JSON，再一次性批准不可变批次。
 
 暂存不会调用目标工具。Review 会重新解析当前策略、工具身份、schema 与参数，返回 SHA-256 digest 和一次性 approval nonce；Commit 只接受这一对凭据，并按顺序让每个动作重新进入 DSH 原有工具流水线。
+
+如果你希望 DSH Agent 保持高效，同时让外部写入更审慎、更透明，欢迎 Star——这会帮助更多 DSH 用户发现这个插件。
 
 ## 为什么需要它
 
