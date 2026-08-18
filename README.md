@@ -25,11 +25,23 @@ Worktrees and file checkpoints can recover local code. They cannot retract an is
 
 ## Install
 
-Install a tagged GitHub release:
+Install the prebuilt release tarball (no install-time build permission required):
+
+```sh
+curl -LO https://github.com/JimchengChina/dsh-action-outbox/releases/download/v0.3.0/dsh-action-outbox-0.3.0.tgz
+npx @deepseek-ai/dsh plugin --profile web add ./dsh-action-outbox-0.3.0.tgz
+```
+
+Or install the tagged Git source:
 
 ```sh
 dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.3.0
 ```
+
+Git installs run the package's `prepare` build. With pnpm 10 or newer, follow the
+DSH error message to add the exact `dsh-action-outbox` package key to the
+profile's `pnpm-workspace.yaml` `allowBuilds` map, then repeat the command. Pinning
+the tag prevents a later branch update from silently changing the installed code.
 
 Or install from a checkout:
 

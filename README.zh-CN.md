@@ -25,11 +25,23 @@ Worktree 和文件 checkpoint 能恢复本地代码，却无法撤回已经发�
 
 ## 安装
 
-安装带版本标签的 GitHub 发布：
+安装预构建的 Release tarball（无需授予安装时构建权限）：
+
+```sh
+curl -LO https://github.com/JimchengChina/dsh-action-outbox/releases/download/v0.3.0/dsh-action-outbox-0.3.0.tgz
+npx @deepseek-ai/dsh plugin --profile web add ./dsh-action-outbox-0.3.0.tgz
+```
+
+或安装带版本标签的 Git 源码：
 
 ```sh
 dsh plugin --profile web add github:JimchengChina/dsh-action-outbox#v0.3.0
 ```
+
+Git 安装会运行包内的 `prepare` 构建。使用 pnpm 10 或更高版本时，请按 DSH
+报错提示，把确切的 `dsh-action-outbox` 包键加入该 profile 的
+`pnpm-workspace.yaml` `allowBuilds` 映射，然后重试。锁定 tag 可防止分支后续
+更新在不知情的情况下改变实际安装代码。
 
 或从本地 checkout 安装：
 
